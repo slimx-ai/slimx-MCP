@@ -89,3 +89,7 @@ pytest
 
 Tests run against a real local HTTP server (the client is stdlib-`urllib` based), so they
 also exercise the SSRF guard and its allowlist/off switches for real.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
