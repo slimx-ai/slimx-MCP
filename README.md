@@ -15,10 +15,11 @@ SlimX layering:
 
 ## What it owns — and deliberately does not
 
-**Owns:** URL validation, SSRF host guarding (resolved-IP checks, IPv4-mapped-IPv6
+**Owns:** the MCP 2026-07-28 stateless Streamable HTTP request envelope, URL validation,
+SSRF host guarding (resolved-IP checks, IPv4-mapped-IPv6
 unwrapping, redirect re-validation), response size caps (5 MB default), timeout clamps,
 SSE unwrapping of streamable-HTTP responses, JSON-RPC error unwrapping, and a stable
-error-category contract (`invalid_url | blocked_host | remote_http | unavailable |
+error-category contract (`invalid_url | invalid_request | blocked_host | remote_http | unavailable |
 timeout | oversize | unreadable | mcp_error`).
 
 **Does not own:** connector registries, OAuth token lifecycles, tool whitelisting policy,
@@ -40,6 +41,12 @@ result = json_rpc(
     allowed_internal_hosts=["web-search-mcp"],  # exact-name SSRF exemptions
 )
 ```
+
+Every call is one independent POST. SlimX-MCP adds `MCP-Protocol-Version`, `Mcp-Method`,
+the required `Mcp-Name` for named calls, and matching protocol version/client
+identity/capabilities under `params._meta`. It does not create protocol sessions or require a
+universal `initialize` exchange. In service mode, a valid host-supplied client identity is
+preserved so the remote sees the actual MCP host rather than the transport proxy.
 
 ## Service mode
 

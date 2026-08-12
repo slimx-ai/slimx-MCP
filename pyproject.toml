@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slimx-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "SlimX-MCP: the bounded MCP transport gateway for the SlimX platform (SSRF-guarded JSON-RPC over HTTP, size/time caps, service mode)."
 readme = "README.md"
 requires-python = ">=3.12"

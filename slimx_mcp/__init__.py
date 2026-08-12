@@ -16,15 +16,17 @@ Two consumption modes:
 
 from slimx_mcp.client import (
     DEFAULT_MAX_RESPONSE_BYTES as DEFAULT_MAX_RESPONSE_BYTES,
+    MCP_PROTOCOL_VERSION as MCP_PROTOCOL_VERSION,
     McpTransportError as McpTransportError,
     json_rpc as json_rpc,
     validate_server_url as validate_server_url,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "DEFAULT_MAX_RESPONSE_BYTES",
+    "MCP_PROTOCOL_VERSION",
     "McpTransportError",
     "json_rpc",
     "validate_server_url",

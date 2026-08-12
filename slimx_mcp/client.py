@@ -11,6 +11,7 @@ to the host's so delegated and in-process modes are indistinguishable to users.
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import json
 import logging
@@ -27,6 +28,22 @@ ALLOWED_URL_SCHEMES = {"http", "https"}
 DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
+# Current stateless Streamable HTTP request profile. Every request is independent: there is no
+# initialize/session manager in this transport revision. The body metadata and mirrored headers
+# are deliberately prepared in this one module so package mode and service mode cannot drift.
+MCP_PROTOCOL_VERSION = "2026-07-28"
+MCP_PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
+MCP_CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo"
+MCP_CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities"
+DEFAULT_CLIENT_INFO = {"name": "slimx-mcp", "version": "0.1.1"}
+DEFAULT_CLIENT_CAPABILITIES: dict[str, Any] = {}
+
+_NAMED_REQUEST_FIELDS = {
+    "tools/call": "name",
+    "resources/read": "uri",
+    "prompts/get": "name",
+}
+
 # Only these caller-supplied header names are forwarded to the remote MCP server. The
 # transport owns Content-Type/Accept itself; auth headers are resolved by the host (which
 # owns tokens/secrets) and passed through. Anything else is dropped — a deliberate
@@ -35,6 +52,7 @@ FORWARDABLE_HEADER_NAMES = frozenset({"authorization", "x-api-key"})
 
 # Error categories a host can rely on (stable contract; additive only).
 CATEGORY_INVALID_URL = "invalid_url"
+CATEGORY_INVALID_REQUEST = "invalid_request"
 CATEGORY_BLOCKED_HOST = "blocked_host"
 CATEGORY_REMOTE_HTTP = "remote_http"
 CATEGORY_UNAVAILABLE = "unavailable"
@@ -57,9 +75,7 @@ class McpTransportError(Exception):
 def validate_server_url(url: str) -> str:
     normalized = str(url or "").strip()
     if not normalized:
-        raise McpTransportError(
-            CATEGORY_INVALID_URL, "Remote MCP connector is missing serverUrl."
-        )
+        raise McpTransportError(CATEGORY_INVALID_URL, "Remote MCP connector is missing serverUrl.")
     parsed = urllib_parse.urlparse(normalized)
     if parsed.scheme.lower() not in ALLOWED_URL_SCHEMES:
         raise McpTransportError(
@@ -169,6 +185,69 @@ def _forwardable_headers(headers: dict[str, str] | None) -> dict[str, str]:
     return forwarded
 
 
+def _request_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a non-mutating copy with the current per-request MCP identity metadata.
+
+    A trusted host may supply its own client identity/capabilities in ``params._meta`` (service
+    mode uses this so the remote sees ControlRoom as the client, not the transport proxy). Missing
+    or malformed reserved values fall back to SlimX-MCP's identity. The protocol version is always
+    forced to this transport's supported revision, so headers and body cannot disagree.
+    """
+    prepared = dict(params or {})
+    raw_meta = prepared.get("_meta")
+    meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+    client_info = meta.get(MCP_CLIENT_INFO_META_KEY)
+    if not (
+        isinstance(client_info, dict)
+        and isinstance(client_info.get("name"), str)
+        and client_info["name"].strip()
+        and isinstance(client_info.get("version"), str)
+        and client_info["version"].strip()
+    ):
+        client_info = dict(DEFAULT_CLIENT_INFO)
+    client_capabilities = meta.get(MCP_CLIENT_CAPABILITIES_META_KEY)
+    if not isinstance(client_capabilities, dict):
+        client_capabilities = dict(DEFAULT_CLIENT_CAPABILITIES)
+    meta[MCP_PROTOCOL_VERSION_META_KEY] = MCP_PROTOCOL_VERSION
+    meta[MCP_CLIENT_INFO_META_KEY] = client_info
+    meta[MCP_CLIENT_CAPABILITIES_META_KEY] = client_capabilities
+    prepared["_meta"] = meta
+    return prepared
+
+
+def _encode_header_value(value: str) -> str:
+    """Encode an MCP mirrored value using the 2026 base64 sentinel rule when needed."""
+    sentinel = value.startswith("=?base64?") and value.endswith("?=")
+    plain_ascii = (
+        value == value.strip(" \t")
+        and not sentinel
+        and all(character == "\t" or 0x20 <= ord(character) <= 0x7E for character in value)
+    )
+    if plain_ascii:
+        return value
+    encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
+    return f"=?base64?{encoded}?="
+
+
+def _request_headers(
+    headers: dict[str, str] | None, method: str, params: dict[str, Any]
+) -> dict[str, str]:
+    """Build required stateless headers from the same method/params sent in the body."""
+    prepared = _forwardable_headers(headers)
+    prepared["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION
+    prepared["Mcp-Method"] = method
+    named_field = _NAMED_REQUEST_FIELDS.get(method)
+    if named_field is not None:
+        value = params.get(named_field)
+        if not isinstance(value, str) or not value:
+            raise McpTransportError(
+                CATEGORY_INVALID_REQUEST,
+                f"MCP {method} request requires a non-empty params.{named_field} value.",
+            )
+        prepared["Mcp-Name"] = _encode_header_value(value)
+    return prepared
+
+
 def json_rpc(
     url: str,
     method: str,
@@ -192,11 +271,20 @@ def json_rpc(
         block_private_hosts=block_private_hosts,
         allowed_internal_hosts=allowlist,
     )
+    request_params = _request_params(params)
     payload = json.dumps(
-        {"jsonrpc": "2.0", "id": f"slimx-mcp-{method}", "method": method, "params": params or {}}
+        {
+            "jsonrpc": "2.0",
+            "id": f"slimx-mcp-{method}",
+            "method": method,
+            "params": request_params,
+        }
     ).encode("utf-8")
     request = urllib_request.Request(
-        validated_url, data=payload, method="POST", headers=_forwardable_headers(headers)
+        validated_url,
+        data=payload,
+        method="POST",
+        headers=_request_headers(headers, method, request_params),
     )
     opener = urllib_request.build_opener(
         _ValidatingRedirectHandler(

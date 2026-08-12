@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from slimx_mcp import __version__
+from slimx_mcp import MCP_PROTOCOL_VERSION, __version__
 from slimx_mcp.service import app
 
 
@@ -25,19 +25,52 @@ def test_health_reports_identity_and_auth_state(client):
 
 
 def test_rpc_success_envelope(client, fake_mcp_server):
-    response = client.post(
-        "/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"}
-    )
+    response = client.post("/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"})
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
     assert [tool["name"] for tool in body["result"]["tools"]] == ["search", "read_file"]
 
 
-def test_rpc_transport_failure_is_an_envelope_not_an_http_error(client):
+def test_rpc_service_emits_current_stateless_envelope(client, fake_mcp_server):
     response = client.post(
-        "/rpc", json={"url": "http://127.0.0.1:9/ok", "method": "tools/list"}
+        "/rpc",
+        json={
+            "url": f"{fake_mcp_server}/echo-headers",
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {"query": "slimx"},
+                "_meta": {
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "slimx-controlroom",
+                        "version": "0.1.0",
+                    },
+                    "io.modelcontextprotocol/clientCapabilities": {"sampling": {}},
+                },
+            },
+        },
     )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    headers = {name.lower(): value for name, value in result["headers"].items()}
+    request = result["request"]
+    assert headers["mcp-protocol-version"] == MCP_PROTOCOL_VERSION
+    assert headers["mcp-method"] == "tools/call"
+    assert headers["mcp-name"] == "search"
+    assert request["params"]["_meta"] == {
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "slimx-controlroom",
+            "version": "0.1.0",
+        },
+        "io.modelcontextprotocol/clientCapabilities": {"sampling": {}},
+        "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+    }
+
+
+def test_rpc_transport_failure_is_an_envelope_not_an_http_error(client):
+    response = client.post("/rpc", json={"url": "http://127.0.0.1:9/ok", "method": "tools/list"})
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
@@ -57,16 +90,12 @@ def test_rpc_remote_http_error_carries_status(client, fake_mcp_server):
 
 def test_rpc_enforces_ssrf_guard_from_env(client, fake_mcp_server, monkeypatch):
     monkeypatch.setenv("MCP_BLOCK_PRIVATE_HOSTS", "true")
-    body = client.post(
-        "/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"}
-    ).json()
+    body = client.post("/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"}).json()
     assert body["ok"] is False
     assert body["error"]["category"] == "blocked_host"
 
     monkeypatch.setenv("MCP_ALLOWED_INTERNAL_HOSTS", "other-host, 127.0.0.1")
-    body = client.post(
-        "/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"}
-    ).json()
+    body = client.post("/rpc", json={"url": f"{fake_mcp_server}/ok", "method": "tools/list"}).json()
     assert body["ok"] is True
 
 

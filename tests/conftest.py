@@ -44,7 +44,9 @@ class _FakeMcpHandler(BaseHTTPRequestHandler):
             headers = {name: value for name, value in self.headers.items()}
             self._send(
                 200,
-                json.dumps({"jsonrpc": "2.0", "result": {"headers": headers}}).encode(),
+                json.dumps(
+                    {"jsonrpc": "2.0", "result": {"headers": headers, "request": request}}
+                ).encode(),
             )
         elif path == "/scalar":
             self._send(200, json.dumps({"jsonrpc": "2.0", "result": [1, 2, 3]}).encode())

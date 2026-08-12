@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from slimx_mcp.client import McpTransportError, json_rpc, validate_server_url
+from slimx_mcp.client import (
+    MCP_CLIENT_CAPABILITIES_META_KEY,
+    MCP_CLIENT_INFO_META_KEY,
+    MCP_PROTOCOL_VERSION,
+    MCP_PROTOCOL_VERSION_META_KEY,
+    McpTransportError,
+    json_rpc,
+    validate_server_url,
+)
 
 
 def _call(base: str, path: str = "/ok", method: str = "tools/list", **kwargs):
@@ -74,7 +82,7 @@ def test_sse_framed_response_is_unwrapped(fake_mcp_server):
     assert _call(fake_mcp_server, path="/sse") == {"tools": []}
 
 
-def test_only_auth_headers_are_forwarded(fake_mcp_server):
+def test_only_auth_and_required_protocol_headers_are_forwarded(fake_mcp_server):
     result = _call(
         fake_mcp_server,
         path="/echo-headers",
@@ -89,7 +97,62 @@ def test_only_auth_headers_are_forwarded(fake_mcp_server):
     assert received["authorization"] == "Bearer connector-token"
     assert received["x-api-key"] == "key-123"
     assert received["content-type"] == "application/json"
+    assert received["mcp-protocol-version"] == MCP_PROTOCOL_VERSION
+    assert received["mcp-method"] == "tools/list"
+    assert "mcp-name" not in received
     assert "x-sneaky" not in received
+
+
+def test_current_stateless_envelope_is_added_without_mutating_caller_params(fake_mcp_server):
+    params = {
+        "name": "search",
+        "arguments": {"query": "slimx"},
+        "_meta": {"trace-id": "trace-1"},
+    }
+
+    result = _call(
+        fake_mcp_server,
+        path="/echo-headers",
+        method="tools/call",
+        params=params,
+    )
+
+    received = {name.lower(): value for name, value in result["headers"].items()}
+    request = result["request"]
+    meta = request["params"]["_meta"]
+    assert received["mcp-protocol-version"] == MCP_PROTOCOL_VERSION
+    assert received["mcp-method"] == request["method"] == "tools/call"
+    assert received["mcp-name"] == request["params"]["name"] == "search"
+    assert meta[MCP_PROTOCOL_VERSION_META_KEY] == MCP_PROTOCOL_VERSION
+    assert meta[MCP_CLIENT_INFO_META_KEY] == {"name": "slimx-mcp", "version": "0.1.1"}
+    assert meta[MCP_CLIENT_CAPABILITIES_META_KEY] == {}
+    assert meta["trace-id"] == "trace-1"
+    assert params["_meta"] == {"trace-id": "trace-1"}
+
+
+def test_named_request_header_uses_base64_sentinel_for_non_ascii_uri(fake_mcp_server):
+    result = _call(
+        fake_mcp_server,
+        path="/echo-headers",
+        method="resources/read",
+        params={"uri": "file:///projects/مرحبا.md"},
+    )
+
+    received = {name.lower(): value for name, value in result["headers"].items()}
+    assert received["mcp-name"].startswith("=?base64?")
+    assert received["mcp-name"].endswith("?=")
+
+
+def test_named_request_without_name_fails_before_network(fake_mcp_server):
+    with pytest.raises(McpTransportError) as excinfo:
+        _call(fake_mcp_server, method="tools/call", params={"arguments": {}})
+    assert excinfo.value.category == "invalid_request"
+
+
+def test_explicit_legacy_tolerant_fixture_still_accepts_additive_envelope(fake_mcp_server):
+    """The named /ok fixture ignores unknown headers/_meta like older bundled servers do."""
+    result = _call(fake_mcp_server, path="/ok", method="tools/list")
+    assert [tool["name"] for tool in result["tools"]] == ["search", "read_file"]
 
 
 # --- failure categories -----------------------------------------------------------------
