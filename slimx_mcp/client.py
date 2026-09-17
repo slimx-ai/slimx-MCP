@@ -18,8 +18,7 @@ import logging
 import socket
 from collections.abc import Iterable
 from typing import Any
-from urllib import parse as urllib_parse
-from urllib import request as urllib_request
+from urllib import parse as urllib_parse, request as urllib_request
 from urllib.error import HTTPError, URLError
 
 logger = logging.getLogger(__name__)
