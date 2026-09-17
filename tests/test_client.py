@@ -45,6 +45,31 @@ def test_private_host_is_blocked_by_default(fake_mcp_server):
     assert excinfo.value.category == "blocked_host"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://100.64.0.1/mcp",  # first address of the RFC 6598 shared address space
+        "http://100.100.100.200/latest/meta-data/",  # Alibaba Cloud instance metadata
+        "http://100.127.255.254/mcp",  # last address
+        "http://[::ffff:100.100.100.200]/mcp",  # the same through an IPv4-mapped literal
+    ],
+)
+def test_shared_address_space_is_blocked_before_any_request(url):
+    """``ipaddress`` does not call 100.64.0.0/10 private, but it is never a public destination."""
+    with pytest.raises(McpTransportError) as excinfo:
+        json_rpc(url, "tools/list")
+    assert excinfo.value.category == "blocked_host"
+
+
+@pytest.mark.parametrize("address", ["100.63.255.255", "100.128.0.1", "8.8.8.8"])
+def test_public_addresses_beside_the_shared_address_space_are_not_blocked(address):
+    import ipaddress
+
+    from slimx_mcp.client import _ip_is_disallowed
+
+    assert _ip_is_disallowed(ipaddress.ip_address(address)) is False
+
+
 def test_internal_allowlist_exempts_host_by_exact_name(fake_mcp_server):
     result = json_rpc(
         f"{fake_mcp_server}/ok",

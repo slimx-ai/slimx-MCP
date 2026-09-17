@@ -87,6 +87,12 @@ def validate_server_url(url: str) -> str:
     return normalized
 
 
+# RFC 6598 shared address space (carrier-grade NAT). ``ipaddress`` does not call it private, but
+# it is never a public destination: it carries overlay and tailnet hosts, and Alibaba Cloud
+# serves its instance metadata from 100.100.100.200.
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
 def _resolve_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     """Resolve a host to every A/AAAA address; an IP literal passes straight through."""
     try:
@@ -106,6 +112,7 @@ def _ip_is_disallowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool
         ip.is_loopback
         or ip.is_link_local  # 169.254.0.0/16 — includes the 169.254.169.254 cloud metadata IP
         or ip.is_private  # RFC1918 + IPv6 unique-local, etc.
+        or (isinstance(ip, ipaddress.IPv4Address) and ip in _SHARED_ADDRESS_SPACE)
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
