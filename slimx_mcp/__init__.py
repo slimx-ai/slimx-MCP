@@ -28,7 +28,7 @@ __all__ = [
     "DEFAULT_MAX_RESPONSE_BYTES",
     "MCP_PROTOCOL_VERSION",
     "McpTransportError",
+    "__version__",
     "json_rpc",
     "validate_server_url",
-    "__version__",
 ]

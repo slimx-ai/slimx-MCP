@@ -27,7 +27,7 @@ class _FakeMcpHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         request = json.loads(self.rfile.read(length) or b"{}")
         path = self.path
@@ -51,9 +51,7 @@ class _FakeMcpHandler(BaseHTTPRequestHandler):
         elif path == "/scalar":
             self._send(200, json.dumps({"jsonrpc": "2.0", "result": [1, 2, 3]}).encode())
         elif path == "/sse":
-            body = (
-                'event: message\ndata: {"jsonrpc": "2.0", "result": {"tools": []}}\n\n'
-            ).encode()
+            body = b'event: message\ndata: {"jsonrpc": "2.0", "result": {"tools": []}}\n\n'
             self._send(200, body, content_type="text/event-stream")
         elif path == "/rpc-error":
             self._send(
