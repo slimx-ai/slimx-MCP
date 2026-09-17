@@ -68,7 +68,7 @@ Transport failures are **data** (a 200 envelope), never HTTP errors — so a ser
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SLIMX_MCP_INTERNAL_TOKEN` | *(empty = auth off)* | shared bearer token, constant-time compared; set the **same value on both sides** |
-| `MCP_BLOCK_PRIVATE_HOSTS` | `true` | reject URLs resolving to private/loopback/link-local/reserved addresses |
+| `MCP_BLOCK_PRIVATE_HOSTS` | `true` | reject URLs resolving to private, shared-address-space (`100.64.0.0/10`), loopback, link-local or reserved addresses |
 | `MCP_ALLOWED_INTERNAL_HOSTS` | *(empty)* | comma-separated exact hostnames exempt from the guard (operator-opted-in internal services) |
 | `MCP_MAX_RESPONSE_BYTES` | `5242880` | transport response cap |
 | `MCP_MAX_TIMEOUT_SECONDS` | `120` | hard cap on a caller-requested timeout |
